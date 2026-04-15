@@ -1,0 +1,110 @@
+ \documentclass[12pt, a4paper]{article} % Tipo di documento
+
+% Preambolo
+\usepackage[utf8]{inputenc} % Codifica caratteri
+\usepackage[italian]{babel}  % Lingua italiana
+
+\title{HTTP/2}
+\author{Pavarin Alberto}
+\date{\today}
+
+\begin{document} % Inizio del corpo
+
+\maketitle % Crea il titolo basato sui dati sopra
+
+\section{Introduzione}
+Le spsecifiche del protocollo applicativo HTTP/2 sono contenute in RFC 7540, da cui questo documento prende riferimento.
+
+Questo protocollo è stato proposto ad inizio 2012 e nel 2015 viene pubblicato RFC, e non pone differenze nella semantica già esistente.
+
+HTTP/2 è stato sviluppato con l'idea di utilizzare in modo più efficiente le risorse di rete e di cercare di diminuire i problemi di latenza che avevano le versioni antecedenti alla 2.
+Viene raggiunto questo obbiettivo permettendo una compressione dei campi degli header e permettendo di compiere più richieste concorrenti nella stessa connessione.
+
+Infatti un limite della versione precedente, ovvero l' HTTP/1.1 era l'impossibilità di compiere più di una richiesta simultanea per connessione, quindi ogni volta che si doveva fare una richiesta si doveva aspettare che quella precedente fosse inviata del tutto. Ovviamente la cosa vale anche per le risposte.
+
+Il problema che questo protocollo risolve quindi è proprio il fatto di come le versioni precedenti utilizzavano il livello di trasporto.
+Anche se la versione 1.1 aveva introdotto il pipelining, cioè la possibilità di compiere più request in una connessione senza aspettare la relativa response per mandare un'altra richiesta, è comunque presente il fenomeno di head-of-line blocking, ovvero i pacchetti vengono bloccati dal primo pacchetto in coda.
+Questo può essere un problema nel caso in cui il primo pacchetto non è completo ma quelli successivi si, cosa che quindi porta ad un rallentamento e quindi una scarsa efficienza.
+
+Inoltre gli header usati nei protocolli precedenti erano spesso verbosi e ripetitivi, cosa che può portare ad una veloce congestione del TCP, che può quindi portare ad una latenza inutilmente elevata.
+
+Un altro aspetto che contraddistingue l'HTTP/2 dagli 1.x è il fatto che trasforma i messaggi in frame, che hanno quindi una struttura e una lunghezza ben precisa. Questo permette di aumentare le prestazioni di parsing e diminuire gli header.
+
+Il frame è proprio l'unità base del protocollo, e ogni tipo di frame ha il proprio scopo e utilizzo. In particolare i frame Data e Headers sono alla base delle request e delle response. 
+
+HTTP/2 quindi utilizza meno connessioni TCP rispetto alle versioni 1.x per realizzare la concorrenza rendendo così il protocollo meno pesante dal punto di vista dell'utilizzo della rete, e dà anche una priorità alle richieste permettendo alle richieste più importati di essere completate più velocemente.
+
+\section{Utilizzo \\[0.3cm] \large Premesse}
+
+HTTP/2 è un protocollo che utilizza una connessione TCP, e la connessione è iniziata dal client.
+
+HTTP/2 utilizza lo stesso schema URI e le stesse porte del protocollo HTTP/1.1.
+
+La concorreza delle richieste è ottenute assegnando un proprio stream a ogni scambio request/response.
+
+\subsection{Identificazione}
+HTTP/2 ha due stringhe identificatore, la stringa "h2" e "h2c".
+
+\begin{itemize}
+    \item h2 indica che il protocollo sta utilizzando il protocollo crittografico TLS (Transport Layer Security), cioè un protocollo che permette confidenzialità e integrità di quello che inviamo (https).
+    \item h2c indica invece che il protocollo sta utilizzando il TCP però in chiaro (http).
+\end{itemize}
+
+\subsection{http URI}
+Un client può fare una richiesta, in questo caso ovviamente non crittografata, anche senza sapere sin da subito se il server supporta HTTP/2.
+
+Questo viene fatto facendo una richiesta HTTP/1.1 che deve includere un header specifico aggiuntivo, l'Upgrade header con valore il token h2c.
+Inoltre deve contenere essattamente un HTTP2-Settings header, che server per specificare dei parametri della connesione, come ad esempio la grandezza dei frame.
+
+Prendendo l'esempio del rfc7540:
+
+\noindent % Evita il rientro della box stessa
+
+  \begin{minipage}{\textwidth}
+    \vspace{10pt} % Padding superiore
+    \hspace{10pt} % Padding sinistro
+    \begin{minipage}{0.9\textwidth} % Sotto-minipage per bloccare il testo
+      \texttt{GET / HTTP/1.1\\
+      Host: server.example.com\\
+      Connection: Upgrade, HTTP2-Settings\\
+      Upgrade: h2c\\
+      HTTP2-Settings: $<$base64url encoding of HTTP/2 SETTINGS payload$>$}
+    \end{minipage}
+    \vspace{10pt} % Padding inferiore
+  \end{minipage}%
+
+Specificando questo header viene detto di utilizzare il protocollo HTTP/2 al posto del 1.1.
+
+Richieste che hanno un payload devono prima essere inviate nella loro interezza e poi il client può mandare frame HTTP/2.
+Inoltre un server che non supporta HTTP/2 si comporta come se quel header non esistesse.
+
+Se invece viene fatta una richiesta che comprende l'Upgrade header con valore "h2" quest'ultimo viene ignorato (l'utilizzo di questo token sarà specificato in futuro).
+
+Un server che supporta HTTP/2 accetta la transizione con una response con lo status code 101, cioè Switching Protocols. 
+Dopo che è stato mandato il codice il server può mandare frame HTTP/2 che devono comprendere la response alla request iniziale.
+
+Alla prima richiesta (HTTP/1.1) viene assegnato lo stream 1 con priorità di default e vien contrassegnata come "half-closed" 
+dal client verso il server, dato che tale richiesta è soddisfatta come una request HTTP/1.1
+
+\subsection{https URI}
+Un client che fa una request a un URI https utilizza l'identificatore "h2" e il TLS con l'estensione Application-Layer Protocol Negotiation (ALPN), che permette di negoziare quale protocollo
+usare durante la fase handshake del TLS, fase in cui server e client stabiliscono una connessione HTTPS sicura e crittografata.
+
+Il client non deve mandare l'identificatore "h2c" e il server, nel caso sia presente l'id, non deve accettarlo, questo perchè h2c non utilizza il TLS.
+
+\subsection{HTTP/2 Connection Preface}
+Ogni endpoint deve mandare come conferma del protocollo in uso e per stabilire una connessione HTTP/2 una Connection Preface.
+Il client manda come prima preface la stringa "PRI * HTTP/2.0\verb|\r\n\r\n|SM\verb|\r\n\r\n|", (dove PRI sta per "Prioritizzazione", SM è un id fisso e i vari CRLF sono i separatori dei blocchi), subito dopo 
+aver ricevuto la response con status code 101 dal server.
+
+Successivamente deve essere seguita da un frame di settings, che può essere anche vuota.
+
+La prima preface del server deve essere un frame di setting che può essere anche vuota.
+
+Se una delle due preface è invalida allora viene trattata come un errore di connesione.
+
+Qui si può vedere uno dei modi con cui l'HTTP/2 smorza le latenze, infatti il client non deve aspettare necessariamente che anche il server mandi la propria connection preface, ma può già iniziare a mandare i
+propri frame. Però è giusto notare che il frame di settings mandato dal server può mettere dei vincoli su come il client deve comunicare con il server.
+
+\section{HTTP FRAME}
+\end{document} % Fine del documento
