@@ -1,8 +1,9 @@
- \documentclass[12pt, a4paper]{article} % Tipo di documento
+\documentclass[12pt, a4paper]{article} % Tipo di documento
 
 % Preambolo
 \usepackage[utf8]{inputenc} % Codifica caratteri
 \usepackage[italian]{babel}  % Lingua italiana
+\usepackage{graphicx}
 
 \title{HTTP/2}
 \author{Pavarin Alberto}
@@ -13,7 +14,7 @@
 \maketitle % Crea il titolo basato sui dati sopra
 
 \section{Introduzione}
-Le spsecifiche del protocollo applicativo HTTP/2 sono contenute in RFC 7540, da cui questo documento prende riferimento.
+Le specifiche del protocollo applicativo HTTP/2 sono contenute in RFC 7540, da cui questo documento prende riferimento.
 
 Questo protocollo è stato proposto ad inizio 2012 e nel 2015 viene pubblicato RFC, e non pone differenze nella semantica già esistente.
 
@@ -46,15 +47,15 @@ La concorreza delle richieste è ottenute assegnando un proprio stream a ogni sc
 HTTP/2 ha due stringhe identificatore, la stringa "h2" e "h2c".
 
 \begin{itemize}
-    \item h2 indica che il protocollo sta utilizzando il protocollo crittografico TLS (Transport Layer Security), cioè un protocollo che permette confidenzialità e integrità di quello che inviamo (https).
-    \item h2c indica invece che il protocollo sta utilizzando il TCP però in chiaro (http).
+    \item \textbf{h2} indica che il protocollo sta utilizzando il protocollo crittografico TLS (Transport Layer Security), cioè un protocollo che permette confidenzialità e integrità di quello che inviamo (https).
+    \item \textbf{h2c} indica invece che il protocollo sta utilizzando il TCP però in chiaro (http).
 \end{itemize}
 
 \subsection{http URI}
 Un client può fare una richiesta, in questo caso ovviamente non crittografata, anche senza sapere sin da subito se il server supporta HTTP/2.
 
 Questo viene fatto facendo una richiesta HTTP/1.1 che deve includere un header specifico aggiuntivo, l'Upgrade header con valore il token h2c.
-Inoltre deve contenere essattamente un HTTP2-Settings header, che server per specificare dei parametri della connesione, come ad esempio la grandezza dei frame.
+Inoltre deve contenere esattamente un HTTP2-Settings header, che serve per specificare dei parametri della connesione, come ad esempio la grandezza dei frame.
 
 Prendendo l'esempio del rfc7540:
 
@@ -107,4 +108,108 @@ Qui si può vedere uno dei modi con cui l'HTTP/2 smorza le latenze, infatti il c
 propri frame. Però è giusto notare che il frame di settings mandato dal server può mettere dei vincoli su come il client deve comunicare con il server.
 
 \section{HTTP FRAME}
+Come detto precedentemente i frame sono alla base della comunicazione tra due endpoint in HTTP/2, e una volta che la connessione è stata stabilita, client e server possono iniziare a scambiarseli.
+\subsection{Formato}
+\begin{figure}[h!] % [h!] forza LaTeX a metterla "qui"
+    \centering % Centra l'immagine nella pagina
+    \includegraphics[width=0.7\textwidth]{img/http_frame_format.png}
+    \caption{Formato frame HTTP/2}
+    \label{fig:http_frame_format} % Utile per i riferimenti incrociati
+\end{figure}
+
+Tutti i frame hanno un header di lunghezza 9 otteti fissi. Non sono compresi in nessuno dei campi mostrati.
+
+Per quanto riguarda i veri e propri frame header abbiamo i seguenti campi:
+\begin{itemize}
+  \item \textbf{Length}: campo di 24 unsigned bit che rappresenta la lunghezza del payload, ovvero il messaggio di quel frame, che ha una lunghezza standard di $2^{14}$ (16384) byte. 
+  Il limite può anche venire aumentato fino a $2^{24} - 1$, appunto, ma attraverso i frame settings e impostando SETTINGS\_MAX\_FRAME\_SIZE.
+  I valori più grandi del limite non devono essere mandati;
+
+  \item \textbf{Type}: campo di 8 bit che determina il tipo, e quindi determina la semantica e il formato del segmento. I tipi sconosciuti devono essere ignorati.
+  Essempi sono il tipo DATA, HEADERS O SETTINGS;
+  
+  \item \textbf{Flags}: campo di 8 bit riservate ai flag specifici per il tipo di frame. Se non definiti per quel tipo di frame vengono ignorati;
+  
+  \item \textbf{R}: campo riservato di un bit, rimane invariato a 0; 
+
+  \item \textbf{Stream Identifier}: campo di 31 bit che serve per identificare lo stream associato al frame, in particolare lo stream id 0 è riservato al controllo della connesione.
+\end{itemize}
+
+\subsection{Dimensione}
+La dimensione per il payload del frame è quindi definito dall'impostazione SETTINGS\_MAX\_FRAME\_SIZE.
+
+Tutte le implementazioni devono essere in grado di ricevere almeno il numero minimo $2^{14}$ byte e i 9 byte di header iniziali.
+
+Un endpoint che riceve un frame che supera la lunghezza impostata, oppure ha una lunghezza troppo piccola per contenere i dati obbligatori del frame deve mandare un errore FRAME\_SIZE\_ERROR.
+Se questo errore può alterare lo stato della connessione, allora è trattato come un errore di connesione.
+
+Ovviamente client e server non sono obbligati ad usare tutto lo spazio disponibile di un frame, anzi più è grande il frame e più c'è possibilità di latenza.
+
+\subsection{Header}
+Come in HTTP/1.1 un campo header è composto da un nome e da un valore ad esso associato, e formano la lista degli header, usata sia per le request che per le response.
+
+Queste liste sono composte da 0 a più header e quando trasmesse su una connesione vengono serializzate in Header block sfruttando la compressione HTTP header. Il blocco è poi diviso
+in 1 o più byte chiamati header block fragments e poi trasmessi.
+
+Chi riceve questi blocchi li ricombina e successivamente li decomprime per ricostruire la header list.
+
+La compressione degli header tiene uno stato, o memoria dato che utilizzando un contesto (memoria condivisa) per tutta la connesione, che viene aggiornato a ogni scambio.
+
+Qui un errore in un blocco deve essere trattato come un errore di connesione di tipo COMPRESSION\_ERROR.
+
+Ogni blocco deve essere processato come una unità discreta e devono essere trasmessi in modo contiguo.
+L'ultimo frame di una sequenza deve avere il flag END\_HEADERS settato.
+
+\section{Stream}
+Uno stream è una sequenza indipendente e bidirezionale di frame tra client e server in una connesione HTTP/2.
+
+Lo stream sono alla base della concorrenza che permette al HTTP/2 di risolvere parte dei problemi descritti nell'introduzione, andando quindi ad utilizzare al meglio la rete e a mascherare le latenze.
+
+Gli stream hanno delle carratteristiche principali, cioè che più stream possono essere aperti ed usati in una stessa connesione HTTP/2.
+Gli stream possono essere stabiliti ed usati sia in modo unilaterale che condivisi dagli endpoint, e possono essere chiusi da qualunque endpoint.
+
+In uno stram l'ordine in cui i frame vengono mandati è significato, dato che vengono processati nell'ordine in cui arrivano, e sono indentificati da un integer, assegnati da chi instanzia lo stream.
+
+\subsection{Stati}
+
+Gli stream si possono trovare in diversi stati, che descrivono le azioni che sono permesse.
+
+Tra gli stati troviamo:
+
+\begin{itemize}
+  \item \textbf{Inattivo}, in cui ricevendo o mandando un frame HEADERS causa lo stream a diventare aperto, mentre se si riceve o si manda un PUSH\_PROMISE frame si passa, rispettivamente, allo stato riservato remoto o locale, cioè viene identificato per utilizzo futuro;
+  \item \textbf{Riservato}, cioè uno stream a cui è associato un utilizzo futuro, ed è appunto identificato in tale modo dalla ricezione o dall'invio di un PUSH\_PROMISE frame;
+  \item \textbf{Aperto}, usato sia da client che da server per mandare frame di qualunque tipo , da questo stato si può direttamente chiudere lo stream, oppure chiuderlo localmente o remotamente;
+  \item \textbf{Half-Closed (locale)}, in cui nello stream è possibile mandare solo determinati frame di controllo;
+  \item \textbf{Half-Closed (remote)}, che indica che lo stream non è più utilizzato dall'endpoint per comunicare e mandare frame;
+  \item \textbf{Chiuso}, è lo stato terminale in cui l'unico frame che si può mandare è solo quello di PRIORITY, se altri tipi vengono mandati l'endpoint che lo riceve lo deve trattare come un errore di stream.
+\end{itemize}
+
+\subsection{Identificatori}
+Servono per identificare gli stream e sono degli interi a 31 bit e non possono essere riutilizzati.
+
+Per differenziare gli stream inizializzati da client da quelli del server, vengono utilizzati id pari se lo stream è inizializzato dal server, mentre se è inizializzato dal client deve essere dispari.
+Mentre l'id 0 è utilizzato per i messaggi di controllo di connesione.
+
+Nel momento in cui una richiesta HTTP/1.1 viene "upgradata" a HTTP/2 lo stream iniziale è inizializzato a 1 e quindi il client non può utilizzare tale id in futuro.
+
+Gli id delle nuove connessioni devono essere numericamente più grandi di quelle aperte o riservate e l'utilizzo di un nuovo stream chiude implicitamente tutti gli stream inattivi con id numerico inferiore a quello nuovo.
+
+Dato che non possono essere riusati potenzialmente c'è il rischio che un endpoint non possa istanziare un nuovo stream, portando alla necessità di aprire una nuova connessione.
+
+\subsection{Concorrenza}
+Può essere stabilito il numero di connessioni concorrente massime attraverso l'impostazione SETTINGS\_MAX\_CONCURRENT\_STREAMS.
+
+Il numero viene applicato solo all'endpoint che riceve l'impostazione all'interno di un frame SETTINGS.
+
+Un endpoint non può eccedere il limite imposto, altrimenti viene ritornato un errore di protocollo o di rifiuto stream.
+
+\subsection{Controllo di Flusso}
+Un controllo di flusso è utilizzato per far in modo che gli stream in una stessa connesione non interferiscano tra di loro.
+
+Ogni flusso di controllo è relativo ad una connessione e ogni endpoint specifica quanti byte è pronto a riceve uno stream o nell'intera connesione.
+Il controllo non si applica a ogni tipo, ad esempio i DATA frame sono soggetti ad esso, mentre gli altri frame no, facendo così ci si assicura che il controllo di flusso non blocchi frame di controllo.
+
+\subsection{Priorità}
+
 \end{document} % Fine del documento
