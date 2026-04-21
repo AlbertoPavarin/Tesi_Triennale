@@ -4,12 +4,22 @@
 \usepackage[utf8]{inputenc} % Codifica caratteri
 \usepackage[italian]{babel}  % Lingua italiana
 \usepackage{graphicx}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,      % colora i link invece di metterli dentro una scatola
+    linkcolor=black,      % colore dei link dell'indice
+    filecolor=magenta,    
+    urlcolor=blue,        % colore degli URL
+}
 
 \title{HTTP/2}
 \author{Pavarin Alberto}
 \date{\today}
 
 \begin{document} % Inizio del corpo
+
+\tableofcontents % Inserisci qui l'indice
+\newpage         % Spesso si vuole l'indice su una pagina a parte
 
 \maketitle % Crea il titolo basato sui dati sopra
 
@@ -107,7 +117,7 @@ Se una delle due preface è invalida allora viene trattata come un errore di con
 Qui si può vedere uno dei modi con cui l'HTTP/2 smorza le latenze, infatti il client non deve aspettare necessariamente che anche il server mandi la propria connection preface, ma può già iniziare a mandare i
 propri frame. Però è giusto notare che il frame di settings mandato dal server può mettere dei vincoli su come il client deve comunicare con il server.
 
-\section{HTTP FRAME}
+\section{HTTP Frame}
 Come detto precedentemente i frame sono alla base della comunicazione tra due endpoint in HTTP/2, e una volta che la connessione è stata stabilita, client e server possono iniziare a scambiarseli.
 \subsection{Formato}
 \begin{figure}[h!] % [h!] forza LaTeX a metterla "qui"
@@ -168,7 +178,7 @@ Lo stream sono alla base della concorrenza che permette al HTTP/2 di risolvere p
 Gli stream hanno delle carratteristiche principali, cioè che più stream possono essere aperti ed usati in una stessa connesione HTTP/2.
 Gli stream possono essere stabiliti ed usati sia in modo unilaterale che condivisi dagli endpoint, e possono essere chiusi da qualunque endpoint.
 
-In uno stram l'ordine in cui i frame vengono mandati è significato, dato che vengono processati nell'ordine in cui arrivano, e sono indentificati da un integer, assegnati da chi instanzia lo stream.
+In uno stream l'ordine in cui i frame vengono mandati è significato, dato che vengono processati nell'ordine in cui arrivano, e sono indentificati da un integer, assegnati da chi instanzia lo stream.
 
 \subsection{Stati}
 
@@ -211,5 +221,178 @@ Ogni flusso di controllo è relativo ad una connessione e ogni endpoint specific
 Il controllo non si applica a ogni tipo, ad esempio i DATA frame sono soggetti ad esso, mentre gli altri frame no, facendo così ci si assicura che il controllo di flusso non blocchi frame di controllo.
 
 \subsection{Priorità}
+Un client che crea uno stream può mandare, dentro al frame HEADERS che apre lo stream, la priorità del nuovo stream, mentre può cambiarla in altri momenti attraverso il PRIORITY frame.
 
+La priorità quindi serve a decidere come un endpoint deve utilizzare le risorse per uno stream quando ne sta gestendo altri in modo concorrente e per quando la capacità di invio non è elevata.
+
+La priorità però non affligge l'ordine in cui gli stream vengono processati o vengono utilizzati, dato che nessun peer può influire sull'ordine in cui l'altro peer utilizza gli stream.
+
+Un altro modo per prioritizzare è quello della dipendenza degli stream.
+
+Tutti gli stream inizialmente vengono creati con priorità 0 e con dipendenza non esclusiva (si veda paragrafo 4.6)
+
+\subsection{Dipendenza}
+Le dipendenze tra stream servono per dare una preferenza all'allocare le risorse per uno stream rispetto a quello dipendente.
+\uppercase{è} quindi utilizzato per fare in modo che ad esempio certe risorse vengano scaricate prima di altre.
+
+La struttura della dipendenza è come quella di un albero, in cui si esprime che il genitore dovrebbe essere soddisfatto prima dei figli, e uno stream può avere più figli, che non hanno un ordine di dipendenza preciso.
+
+Si può invece assegnare tramite un flag la dipendenza unica per uno stream, cioè il nuovo stream sarà aggiunto come unico figlio dello stream padre, mentre i vecchi figli dello stream padre diventeranno figli del nuovo stream.
+
+Ovviamente nessunio stream può dipendere su sè stesso e nel caso questo accada l'endpoint deve trattare questo come un errore di stream PROTOCOL\_ERROR.
+
+Ad ogni stream dipendente viene assegnato un peso da 1 a 256 incluso, che serve per specificare come le risorse dovrebbero essere allocate tra i figli, cioè in base ai pesi assegnati.
+
+Nel momento in cui uno stream viene chiuso, le sue dipendenze posso essere spostate al padre, cosa che quidni porta ad un ricalcolo dei pesi e delle priorità. I pesi vengono ricalcolati con i nuovi vicini che si sono creati.
+
+\section{Gestione Errori}
+HTTP/2 permette due classi di errori, cioè un errore che rende l'intera connesione inutilizzabile, e uno in uno stream preciso che chiude lo stream.
+
+La lista degli errori è lasciata al documento ufficiale del rfc.
+
+\subsection{Errori Di Connessione}
+\uppercase{è} un errore che impedisce ulteriore elaborazione dei frame e ferma la connessione.
+
+Questo viene fatto attraverso l'utilizzo di un frame specifico chiamato GOAWAY, mandato quando un endpoint incontra tale errore, che specifica qual è l'ultimo stream che è stato effettivamente ricevuto dal proprio peer e il motivo della chiusura
+della comunicazione, Dopo l'invio di questo frame viene chiusa la connessione TCP.
+
+Un endpoint può chiudere una connessione in qualunque momento, e ogni volta l'endpoint dovrebbe mandare il GOAWAY frame, il quale non è detto che venga ricevuto dall'altro endpoint.
+
+\subsection{Errore Di Stream}
+\uppercase{è} un errore che avviene all'interno di uno stream e che non influenza gli altri stream.
+
+L'errore è identificato dal frame RST\_STREAM che contiene id dello stream che ha avuto tale errore e un codice che lo descrive.
+
+RST\_STREAM è l'ultimo frame che un endpoint può mandare in uno stream, ma deve essere preparato per a ricevere i frame che l'altro endpoint aveva mandato o aveva programmato di mandare a tale stream, messaggi che possono essere tutti ignorati tranne quelli che alterano lo stato della connesione.
+
+Per evitare loop un endpoint non deve mandare in risposta un RST\_STREAM se ne ha ricevuto un altro in precedenza.
+
+\section{Estendere HHTP/2}
+HTTP/2 consento l'espansione del protocollo, cioè aggiungere servizi o alterare aspetti del protocollo.
+Questo però può venire fatto solo agli elementi definiti all'interno del rfc, quindi non si possono aggiungere nuovi status code, header ecc.
+
+Si possono però aggiungere nuovi codice di errore, tipi di frame e nuove impostazioni.
+
+Quando un endpoint vuole espandere il protocollo deve prima negoziare i nuovi comportamenti con l'endpoint remoto, il quale deve dare un segnale positivo
+
+\section{Definizioni Frame}
+Ogni tipo di frame è identificato da un codice di 8 bit, e ogni frame ha un compito specifico nello stabilire e gestire la connessione.
+
+La trasmissione di certi frame può alterare la connessione ed entrambi gli endpoint devono essere sincronizzati sullo stato della connessione, e se non riescono a mantenerla una comunicazione efficace non sarà più possibile.
+
+\subsection{Data Frame}
+Ha ID 0x0. 
+
+Frame che che contiene una sequenza variabile di byte associato ad uno stream, che possono contenere del padding in modo da mascherare la lunghezza dei messaggi.
+
+Contiene i campi :
+\begin{itemize}
+  \item \textbf{Pad} Length, cioè un un campo di 8-bit opzionale che indica la lunghezza del padding in byte;
+  \item \textbf{Data}, cioè la quantità di dati rimanenti nel payload dopo che sono state sottratte le lunghezze degli altri campi presenti;
+  \item \textbf{Padding}, cioè i byte di padding, devono essere settati al valore 0. Questo valore in particolare deve combaciare con quello all'interno di Pad Length.
+\end{itemize}
+
+\subsection{Headers Frame}
+Ha ID 0x1 ed è usato per aprire la connessione e può trasportare anche un frammento del blocco di header.
+
+Contiene i campi :
+\begin{itemize}
+  \item \textbf{Pad Length}, cioè un un campo di 8-bit opzionale che indica la lunghezza del padding in byte;
+  \item \textbf{E}, cioè un flag di 1 bit che indica se la dipendenza dello stream è esclusiva o no;
+  \item \textbf{Stream Dependency}, cioè un campo di 31 bit che indica l'id dello stream padre, presente solo se il flag PRIORITY è settato, flag che indica che i pesi ecc. sono presenti;
+  \item \textbf{Weight}, cioè un campo di 8 bit senza segno che rappresenta un peso di priorità per lo stream, anche questo è settato se il flaf PRIORITY è settato;
+  \item \textbf{Header Block Fragment}, appunto un frammento di header block, che forma il payload del frame;
+  \item \textbf{Padding}, cioè i byte di padding.
+\end{itemize}
+
+Ogni frame deve essere associato ad uno stream e se l'id dello stream è 0, allora chi riceve il segmento deve rispondere con un errore di connessione.
+
+\subsection{Priority Frame}
+Ha ID 0x2 e specifica la priorità dello stream.
+
+Contiene i campi:
+\begin{itemize}
+  \item \textbf{E}, cioè un flag di 1 bit che indica se la dipendenza dello stream è esclusiva o no;
+  \item \textbf{Stream Dependency}, cioè un campo di 31 bit che indica l'id dello stream padre;
+  \item \textbf{Weight}, cioè un campo di 8 bit senza segno che rappresenta un peso di priorità per lo stream;
+\end{itemize}
+
+Ogni frame deve essere associato ad uno stream e se l'id dello stream è 0, allora chi riceve il segmento deve rispondere con un errore di connessione.
+
+\subsection{RST\_STREAM Frame}
+Ha ID 0x3 e indica l'immediata terminazione di uno stream
+
+Presenta un singolo campo, l' \textbf{Error Code}, che è un campo di 32 bit che identifica l'errore che ha portato alla terminazione dello stream.
+
+Ogni frame deve essere associato ad uno stream e se l'id dello stream è 0, allora chi riceve il segmento deve rispondere con un errore di connessione.
+
+\subsection{Settings Frame}
+Ha ID 0x4 e serve per trasmettere i parametri di configurazione che definiscono come gli endpoint devono comunicare.
+
+Devono essere mandati sia da client che da browser all'inizio della comunicazione e possono anche in ogni momento della comunicazione.
+
+Ogni parametro va a sostituire il valore di un parametro che già esisteva e vengono processati nell'ordine in cui arrivano.
+Chi riceve il frame deve riconoscere i parametri attraverso il flag ACK.
+
+Ogni frame influenza l'intera connessione e non un solo stream, quindi ogni frame deve essere associato allo stream 0, se ha un altro valore allora chi lo ha ricevuto deve rispondere con un errore di connessione.
+
+Ogni parametro del frame è definito da un identificatore di 16 bit e un valore di 32 bit.
+
+\subsection{PUSH\_PROMISE Frame}
+Ha ID 0x5 e serve per notificare al peer in anticipo il flusso che il mittente vuole avviare.
+
+Contiene i campi:
+\begin{itemize}
+  \item \textbf{Pad Length}, cioè un un campo di 8-bit opzionale che indica la lunghezza del padding in byte;
+  \item \textbf{R}, che è un bit riservato;
+  \item \textbf{Promised Stream ID}, cioè un campo di 31 bit senza segno che identifica lo stream che si vuole riservare;
+  \item \textbf{Header Block Fragment}, cioè un header block fragment che contiene gli header delle request;
+  \item \textbf{Padding}, cioè i byte di padding.
+\end{itemize}
+
+Ogni frame deve essere associato ad uno stream e se l'id dello stream è 0, allora chi riceve il segmento deve rispondere con un errore di connessione.
+
+Chi lo riceve può anche rifiutare lo stream promesso.
+
+\subsection{Ping Frame}
+Ha ID 0x6 ed è utilizzato come meccanismo per misurare il tempo di andata e ritorno di un frame e per verificare se una connessione inattiva è ancora funzionante.
+
+\uppercase{è} formato da 64 bit di dati opachi, cioè un dato la cui struttura è invisibile all'utente ma visibile solo all'interfaccia.
+
+I frame non sono associati ad uno stream particolare e se è ricevuto nel campo che identifica lo stream diverso da 0 chi lo riceve deve rispondere con un errore di connessione
+
+\subsection{Goaway Frame}
+Ha ID 0x7 ed è usato per iniziare la chiusura di una connessione o per segnalare errori severi. Permette a un endpoint di smettere di accettare nuovi stream mentre sta finendo di processare altri stream precedentemente inizializzati.
+
+Questo frame dovrebbe essere sempre mandato quando un endpoint vuole chiudere la connessione per sapere cosa il peer ha iniziato a processare.
+
+Contiene i seguenti campi:
+\begin{itemize}
+  \item \textbf{R}, che è un bit riservato;
+  \item \textbf{Last-Stream-ID}, che è un campo di 31 bit che indica lo stream con id più alto per il quale, chi ha mandato il frame, ha compiuto delle azioni, questo viene fatto per impedire race conditions tra chi manda il frame e tra il mittente che instanzia nuovi stream;
+  \item \textbf{Error Code}, che contiene la ragione per la quale la connessione è stata chiusa;
+  \item \textbf{Additional Debug Data}, che contiene dati opachi addizionali e opzionali che servono per motivi diagnostici.
+\end{itemize}
+
+Ogni frame influenza l'intera connessione e non un solo stream, quindi ogni frame deve essere associato allo stream 0, se ha un altro valore allora chi lo ha ricevuto deve rispondere con un errore di connessione.
+
+\subsection{WINDOW\_UPDATE Frame}
+Ha ID 0x8 ed è utilizzato per implementare il controllo di flusso, ed è applicato solo ai frame soggetti al controllo di flusso.
+
+Contiene i campi:
+\begin{itemize}
+  \item \textbf{R}, che è un bit riservato;
+  \item \textbf{Window Size Increment}, che è un campo di 31 bit senza segno che indica il numero di byte che il mittente può trasmettere in aggiunta alla già esistente finestra.
+\end{itemize}
+
+La finestra di controllo di flusso indica, attraverso un intero, quanti byte un endpoint può mandare.
+
+\subsection{Continuation Frame}
+Ha ID 0x9 ed è utilizzato per continuare la sequenza di un header block fragment.
+
+Contiene il campo \textbf{Header Block Fragment}.
+
+Deve essere associato ad uno stream e se l'id dello stream è 0, allora chi riceve il segmento deve rispondere con un errore di connessione.
+
+\section{Codici di Errore}
 \end{document} % Fine del documento
