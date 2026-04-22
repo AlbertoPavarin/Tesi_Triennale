@@ -395,4 +395,56 @@ Contiene il campo \textbf{Header Block Fragment}.
 Deve essere associato ad uno stream e se l'id dello stream è 0, allora chi riceve il segmento deve rispondere con un errore di connessione.
 
 \section{Codici di Errore}
+I codici di errore sono codici di 32 bit che permettono di identificare un errore.
+
+Vengono utilizzati nei frame RST\_STREA e GOAWAY, per comunicare quale è la ragione dell'errore dello stream o della connessione.
+
+Certi errori si applicano solo allo stream o all'interna connessione e non hanno semantica definita in altri casi.
+
+Codici sconosciuti o non supportati non devono attivare nessun comportamento speciale.
+
+I codici di errore sono definiti dal codice 0x1 fino al codice 0xd.
+
+I codici definiti sono i seguenti:
+
+\begin{itemize}
+  \item \textbf{NO\_ERROR (0x0)}: la condizione associata non genera nessun errore. Esempio un goaway può usarlo per indicare che la connessione è in chiusura in modo corretto; 
+  \item \textbf{PROTOCOL\_ERROR (0x1)}: l'endpoint ha riscontrato un errore di protocollo non specificato, usato quando un errore più specifico non è disponibile;
+  \item \textbf{INTERNAL\_ERROR (0x2)}: l'endpoint ha riscontrato un errore interno non aspettato;
+  \item \textbf{FLOW\_CONTROL\_ERROR (0x3)}: l'endpoint ha rilevato che il peer non sta rispettando il controllo di flusso;
+  \item \textbf{SETTINGS\_TIMEOUT (0x4)}: l'endpoint ha mandato un SETTINGS frame ma non ha ricevuto una risposta in un tempo accettabile;
+  \item \textbf{STREAM\_CLOSED (0x5)}: l'endpoint ha ricevuto un frame quando lo stream è half-closed;
+  \item \textbf{FRAME\_SIZE\_ERROR (0x6)}:l'endpoint ha ricevuto un frame di una grandezza invalida;
+  \item \textbf{REFUSED\_STREAM (0x7)}: l'endpoint ha rifiutato lo stream prima di eseguire qualunque elaborazione di esso;
+  \item \textbf{CANCEL (0x8)}: l'endpoint specifica che un determinato stream non è più necessario;
+  \item \textbf{COMPRESSION\_ERROR (0x9)}: l'endpoint non è più in grado di tenere il contesto di compressione per la connessione;
+  \item \textbf{CONNECT\_ERROR (0xa)}: la connessione stabilita dopo la richiesta di connessione è stata chiusa o resettata in modo anomalo;
+  \item \textbf{ENHANCE\_YOUR\_CALM (0xb)}: l'endpoint rileva che il peer sta generando troppo carico;
+  \item \textbf{INADEQUATE\_SECURITY (0xc)}: il trasporto non rispetta le proprietà minime di sicurezza, un esempio è quando si utilizza una versione di TLS obsoleta o altri problemi di crittografia;
+  \item \textbf{HTTP\_1\_1\_REQUIRED (0xd)}: l'endpoint richiede che sia usato HTTP/1.1 e non HTTP/2.
+\end{itemize}
+
+\section{Scambio Messaggi HTTP}
+HTTP/2 è implementato per essere compatibil quanto più possibile con le versioni precedenti, quindi significa che molte delle caratteristiche non cambiano.
+
+\subsection{Scambio Rquest/Response}
+Il client manda una request al server in uno stream che ha un identificatore non precedentemente utilizzato, e il server risponderà sullo stesso stream con una response relativa alla request ricevuta.
+Lo scambio consuma completamente uno stream.
+
+Un messaggio HTTP consiste, per una risposta in 0 o più HEADERS frame seguiti da 0 o più CONTINUATION frame che contengono gli header delle response informative.
+Successivamente un HEADERS frame, che anche qui può essere seguito dai CONTINUATION frame, che contiene gli header dei messaggi.
+Poi vengono mandati 0 o più DATA frame contenenti l'eventuale payload body.
+
+L'ultimo frame nella sequenza genera un END\_STREAM flag, e se in tale HEADERS frame il flag non è settato allora la request o la response deve essere considerata mal posta.
+Dopo di questo se si sta facendo una request lo stream diventa half-closed(local), per il client e half-closed(remote), per il server, mentre per la response lo stream entra nello stato chiuso.
+
+Non devono esserci altri frame contenuti tra i frame HEADERS e CONTINUATION.
+
+Il payload è quindi trasportato dai frame DATA, ai quali non si deve applicare la codifica dei "chunk" come nell'HTTP/1.1.
+
+Una response è considerata completa quando il server manda o il client riceve il frame con il flag END\_STREAM settato.
+
+Inoltre un server può mandare una response prima di una request se tal response non è dipendente dalle request.
+
+\subsubsection{HTTP/2 Upgrading}
 \end{document} % Fine del documento
