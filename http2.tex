@@ -447,4 +447,62 @@ Una response è considerata completa quando il server manda o il client riceve i
 Inoltre un server può mandare una response prima di una request se tal response non è dipendente dalle request.
 
 \subsubsection{HTTP/2 Upgrading}
+HTTP/2 proibisce e rimuove l'utilizzo dello status code 101 (Switching Protocols), questo perchè HTTP/2 non può cambiare protocollo durante la connessione.
+
+Il motivo è perchè essendo che HTTP/2 gestisce degli stream multiplexati e cambiare il protocollo renderebbe la gestione dei frame diventerebbe più difficile e meno sicuro.
+
+\subsubsection{Pseudo Header}
+A differenza di HTTP/1.1 che usa la cosiddetta start-line per trasportare metodo, uri e versione della request, HTTP/2 utilizza un campo pseudo-header che inizia con il carattere ':'.
+
+Questi pseudo header non sono HTTP header e quindi gli endpoint non devono generarne di diversi da quelli definiti dal rfc.
+Inoltre se vengono inseriti nelle request non devono essere inseriti nelle response e viceversa.
+
+Nel caso in cui sia usato un pseudo header non definito o invalido la richiesta o la risposta deve essere ritenuta malformata.
+
+I campi definti per la request sono:
+\begin{itemize}
+    \item \textbf{:method}, include il metodo HTTP;
+    \item \textbf{:scheme}, indica lo schema dell'uri, non è limitato ad http o https;
+    \item \textbf{:authority}, indica informazioni dell'autorità dell'host, come port e host name;
+    \item \textbf{:path}, include il percorso e la parte query dell'uri target.
+\end{itemize}
+
+Mentre per la response sono:
+\begin{itemize}
+    \item \textbf{:status}, include lo status code.
+\end{itemize}
+
+\subsubsection{Connection header}
+HTTP/2 non utilizza header specifici per le informazioni della connessione, queste informazioni sono trasportate in altri modi. In caso questo header è presenta la request o la response deve essere considerata malformata.
+
+Questo significa che se un endpoint vuole trasformare la connessione da HTTP/1.1. a 2 deve togliere gli header specifici della connessione.
+
+\subsubsection{Cookie Header}
+Utilizza ';' per delimitare le cookie-pairs.
+
+Nella versione 1.1 il cookie header non poteva essere separato in più coppie chiave-valore, mentre in HTTP/2 questo è reso possibile in modo da rendere più efficace la compressione di tale header.
+
+Se dopo la decompressione sono presenti più coppie di cookie (quindi più cookie header), esse devono essere concatenate con il separatore '; ', prima di essere passato in un'applicazione non HTTP/2.
+
+Come esempio è riportato quello del rfc:
+
+\noindent % Evita il rientro della box stessa
+
+\begin{minipage}{\textwidth}
+  \vspace{10pt} % Padding superiore
+  \hspace{10pt} % Padding sinistro
+  \begin{minipage}{0.9\textwidth} % Sotto-minipage per bloccare il testo
+    \texttt{cookie: a=b; c=d; e=f\\\\
+      cookie: a=b\\
+      cookie: c=d\\
+      cookie: e=f\\
+  }
+  \end{minipage}
+  \vspace{10pt} % Padding inferiore
+\end{minipage}%
+
+Semanticamente le due liste di cookie sono identiche.
+
+\subsubsection{Request E Response Malformate}
+
 \end{document} % Fine del documento
