@@ -5,6 +5,8 @@
 \usepackage[italian]{babel}  % Lingua italiana
 \usepackage{graphicx}
 \usepackage{hyperref}
+\usepackage{placeins}
+
 \hypersetup{
     colorlinks=true,      % colora i link invece di metterli dentro una scatola
     linkcolor=black,      % colore dei link dell'indice
@@ -239,22 +241,22 @@ La struttura della dipendenza è come quella di un albero, in cui si esprime che
 
 Si può invece assegnare tramite un flag la dipendenza unica per uno stream, cioè il nuovo stream sarà aggiunto come unico figlio dello stream padre, mentre i vecchi figli dello stream padre diventeranno figli del nuovo stream.
 
-Ovviamente nessunio stream può dipendere su sè stesso e nel caso questo accada l'endpoint deve trattare questo come un errore di stream PROTOCOL\_ERROR.
+Ovviamente nessuno stream può dipendere su sè stesso e nel caso questo accada l'endpoint deve trattare questo come un errore di stream PROTOCOL\_ERROR.
 
 Ad ogni stream dipendente viene assegnato un peso da 1 a 256 incluso, che serve per specificare come le risorse dovrebbero essere allocate tra i figli, cioè in base ai pesi assegnati.
 
-Nel momento in cui uno stream viene chiuso, le sue dipendenze posso essere spostate al padre, cosa che quidni porta ad un ricalcolo dei pesi e delle priorità. I pesi vengono ricalcolati con i nuovi vicini che si sono creati.
+Nel momento in cui uno stream viene chiuso, le sue dipendenze posso essere spostate al padre, cosa che quindi porta ad un ricalcolo dei pesi e delle priorità. I pesi vengono ricalcolati con i nuovi vicini che si sono creati.
 
 \section{Gestione Errori}
 HTTP/2 permette due classi di errori, cioè un errore che rende l'intera connesione inutilizzabile, e uno in uno stream preciso che chiude lo stream.
 
-La lista degli errori è lasciata al documento ufficiale del rfc.
+La lista degli errori è lasciata al documento ufficiale del rfc e verrà definita più avanti nel seguente documento.
 
 \subsection{Errori Di Connessione}
 \uppercase{è} un errore che impedisce ulteriore elaborazione dei frame e ferma la connessione.
 
 Questo viene fatto attraverso l'utilizzo di un frame specifico chiamato GOAWAY, mandato quando un endpoint incontra tale errore, che specifica qual è l'ultimo stream che è stato effettivamente ricevuto dal proprio peer e il motivo della chiusura
-della comunicazione, Dopo l'invio di questo frame viene chiusa la connessione TCP.
+della comunicazione. Dopo l'invio di questo frame viene chiusa la connessione TCP.
 
 Un endpoint può chiudere una connessione in qualunque momento, e ogni volta l'endpoint dovrebbe mandare il GOAWAY frame, il quale non è detto che venga ricevuto dall'altro endpoint.
 
@@ -263,7 +265,7 @@ Un endpoint può chiudere una connessione in qualunque momento, e ogni volta l'e
 
 L'errore è identificato dal frame RST\_STREAM che contiene id dello stream che ha avuto tale errore e un codice che lo descrive.
 
-RST\_STREAM è l'ultimo frame che un endpoint può mandare in uno stream, ma deve essere preparato per a ricevere i frame che l'altro endpoint aveva mandato o aveva programmato di mandare a tale stream, messaggi che possono essere tutti ignorati tranne quelli che alterano lo stato della connesione.
+RST\_STREAM è l'ultimo frame che un endpoint può mandare in uno stream, ma deve essere preparato a ricevere i frame che l'altro endpoint aveva mandato o aveva programmato di mandare a tale stream, messaggi che possono essere tutti ignorati tranne quelli che alterano lo stato della connesione.
 
 Per evitare loop un endpoint non deve mandare in risposta un RST\_STREAM se ne ha ricevuto un altro in precedenza.
 
@@ -504,5 +506,145 @@ Come esempio è riportato quello del rfc:
 Semanticamente le due liste di cookie sono identiche.
 
 \subsubsection{Request E Response Malformate}
+Una request o una response malformata è invalida a causa della presenza di un frame estraneo, o un campo header non riconosciuto, o dall'assenza di header obbligatori o se sono presenti nomi di header scritto in uppercase.
 
+Possono essere malformate anche nel caso in cui sia presente l'header Content-Length, ma la somma di tutti i payload dei frame DATA non sono uguali al valore dell'header.
+Una response però può anche non avere body ma un Content-Length diverso da 0.
+
+Se sono presenti intermediari che processano richieste e response HTTP non devono inoltrarle e devono essere trattate come uno stream error.
+
+\subsubsection{Esempi}
+Qui sotto sono riportati degli esempi di request e response, altre sono presenti nel rfc.
+\begin{figure}[h!] % [h!] forza LaTeX a metterla "qui"
+    \centering % Centra l'immagine nella pagina
+    \includegraphics[width=0.7\textwidth]{img/esempio1_req_res.png}
+    \caption{GET request con header e no body}
+    \label{fig:esempio1_req_res} % Utile per i riferimenti incrociati
+\end{figure}
+
+\begin{figure}[h!] % [h!] forza LaTeX a metterla "qui"
+    \centering % Centra l'immagine nella pagina
+    \includegraphics[width=0.7\textwidth]{img/esempio2_req_res.png}
+    \caption{Response contenente solo gli header serializzati}
+    \label{fig:esempio2_req_res} % Utile per i riferimenti incrociati
+\end{figure}
+
+\begin{figure}[h!] % [h!] forza LaTeX a metterla "qui"
+    \centering % Centra l'immagine nella pagina
+    \includegraphics[width=0.7\textwidth]{img/esempio3_req_res.png}
+    \caption{POST Request con header e payload}
+    \label{fig:esempio3_req_res} % Utile per i riferimenti incrociati
+\end{figure}
+\FloatBarrier % <--- Qui LaTeX scarica tutte le immagini rimaste in sospeso
+
+\subsection{Meccanismo di affidabilità}
+HTTP/2 prevede due meccanismi per garantire al client che la richiesta non è stata processata:
+\begin{itemize}
+  \item Il frame GOAWAY indica l'identificatore dello stream che è stato processato, quindi garantisce che per i numeri più grandi è sicuro riprovare;
+  \item L'errore REFUSE\_STREAM all'interno del frame RST\_STREAM, che indica che lo stream è stato chiuso prima che sia stata fatta qualunque processazzione.
+\end{itemize}
+
+In particolare se lo stream non è stato processato allora non significa che abbia failato.
+
+Inoltre un server deve indicare gli stream come non processati solo se può garantirlo, se ad esemmpio un frame ha superato il livello applicativo allora il REFUSED\_STREAM error no può e non deve essere usato, e il GOAWAY frame deve quindi contenere un identificatore dello stream 
+maggiore o uguale allo stream che ha ricevuto tale frame.
+
+\subsection{Server Push}
+HTTP/2 permette ad un server di mandare in anticipo (push) più response a un client che ha fatto una request, cosa può essere utile quando il server sa in anticipo che quelle response serviranno in futuro al client.
+
+Cioè spieghiamolo con un esempio: Un client richiede una pagina html a cui è legato il css per lo stile, senza il server push il server risponderebbe con la pagina html che sarà ricevuta dal client il quale analizzandola si accorgerà che avrà bisogno anche del css, quindi dovrà fare 
+un'altra richiesta in modo da poter ottenere il file css.
+Con il server push invece il server insieme al file html manda (push) anche il css.
+
+Questo comporta un abbassamento della latenza dato che insieme al html viene mandato anche il css, senza che il client debba richiederlo, cosa che aggiunge tempo.
+
+Questa opzione può essere anche disabilitata settando a 0 l'impostazione SETTINGS\_ENABLE\_PUSH.
+
+La server push funziona circa come una semplice risposta da parte del server, ma in questo caso la request viene anche mandata dal server come un PUSH\_PROMISE frame.
+
+Questo frame contiene un header block composto a sua volta l'intero set degli header che il server attribuisce alla request. Questa request non deve però avere nessun body.
+
+Il PUSH\_PROMISE frame mandato dal server (solo il server può mandarlo), viene mandato sullo stream usato dal client per far la request. Inoltre il frame contiene un identifier promesso, cioè che verrà usato in futuro dagli id disponibili al server, cioè quelli con numero pari.
+
+Questi frame devono essere mandati prima di ogni altro frame che si riferisce alla effettiva richiesta.
+
+Dopo che il server ha mandato il frame PUSH\_PROMISE il server può effettivamente iniziare a mandare la response alla request fatta dal client usando lo stream indicato nel frame PUSH\_PROMISE esattamente come una normale response.
+
+Il client può anche non accettare la pushed response, per esempio perchè il server ci sta mettendo troppo ad inviare la promised response, può utilizzare il frame RST\_STREAM, usando o il codice CANCEL o il codice REFUSED\_STREAM.
+
+Il cliente che riceve la response deve validare se il server è autoritativo o se il proxy che ha inoltrato la pushed response è configurata per la relativa request.
+
+\subsection{Metodo Connect}
+Il metodo connect è utilizzato nell'HTTP/2 per stabilire un tunnel su uno stream verso un host remoto, spesso con l'obbiettivo di interagire con risorse "https".
+
+Il campo header ha le seguenti caratteristiche:
+\begin{itemize}
+  \item \textbf{:method} pseudo-header impostato a CONNECT;
+  \item \textbf{:scheme e :path} pseudo-header devono essere omessi;
+  \item \textbf{:authority} pseudo-header contiene l'host e la porta a cui ci si vuole connettere.
+\end{itemize}
+
+Se una CONNECT request non segue questo schema allora la richiesta è malformata.
+
+\section{Altre Considerazioni Su HTTP/2}
+In questa sezione sono contenute altre informazioni riguardanti a come il protocollo migliori l'interoperabilità e riduce l'esposizione a vulnerabilità di sicurezza e a potenziali variazioni per l'implementazione.
+
+\subsection{Gestione Connessione}
+Le connessioni in HTTP/2 sono persistenti, per le migliori performance il client dovrebbe chiudere la connessione solamente quando è sicuro che la comunicazione è finita o finchè il server non chiude la connessione esso stesso.
+
+I client non dovrebbero aprire più connessioni verso un particolare coppia host-port.
+
+Un client può creare connessioni addizionali come sostituzione, ad esempio quando gli stream stanno per esaurirsi o per sostituire connessioni che hanno avuto errori.
+
+I server inoltre dovrebbero mantenere la connessione aperta per il più possibile ma possono terminare le connessioni inattive se vogliono.
+
+\subsubsection{Riuso Connessioni}
+Connessioni stabilite con un server di origine possono essere riusate per request con le componenti authority dell'uri diverse, finchè il server d'origine è autoritativo.
+
+Per risorse https per riutilizzare una connessione si deve verificare se è presente un certificato per l'host specificato nell'uri, che deve soddisfare le richieste del client.
+
+Un server potrebbe offrire un certificato con dei determinati attributi chiamati "subjectAltName", che serve per indicare che la connessione può essere utilizzata anche per request con altri uri specificati.
+Per esempio, un certificato con "subjectAltName" con valore "*.example.com", permette che la stessa connessione possa essere utilizzata con uri del tipo "https://a.example.com", "https://b.example.com" ecc.
+
+Un server che non permette il riuso della connessione può indicare che non è autoritativo per una richiesta mandando lo status code 421 (Misdirected Request), in risposta alla request.
+
+\subsubsection{Status Code 421 (Misdirected Request)}
+Lo status code 421 (Misdirected Request), indica che la request è stata diretta verso un server che non può produrre una response, come per esempio se una request viene mandata ad un server che non è configurato per mandare response alla combinazione di scheme e authority incluso nell'uri della request.
+
+Se un client riceve tale status code può ritentare la request su un'altra connessione.
+
+\subsection{Uso del TLS}
+HTTP/2 deve utilizzare TLS1.2 o superiore che inoltre deve supportare l'estensione SNI (Server Name Indication), che permette ad un server di ospitare più certificati e il virtual hosting. I client devono specificare il dominio quando stanno negoziando il TLS.
+
+Se viene utilizzato TLS 1.2 allora non si dovrebbero usare nessuna delle chiper suites listate nella cipher suite black list (Appendix A).
+
+\section{Considerazioni Di Sicurezza}
+\subsection{Autorità Del Server}
+HTTP si basa sulla nozione di reponse autoritativa, cioè una response che è stata determinata dall'authority identificata all'interno del uri, come la response più appropriata per una determinata request in base allo stato delle risorse.
+
+Nel momento in cui riceviamo una risposta da un server autoritativo quindi abbiamo la sicurezza che quella sia la response più adeguata alla nostra request.
+
+Però stabilire l'autorità può essere difficile a causa di vari attacchi di phishing o poisoning, che possono portare chi fa la request ad avere la percezione che chi gli sta rispondendo sia il server corretto.
+
+\subsubsection{Attacchi Cross-Protocol}
+In un attacco di questo genere un client inzia una transazione usando un protocollo verso un server che è programmato per capirne un altro.
+
+Un attaccante può far sembrare che la transazione avviata nel primo protocollo possa essere valida anche per il secondo nei casi di server non ben protetti.
+
+Nel caso dell'HTTP/2 completare un handshake TLS con un identificatore ALPN, cioè la stringa che identifica il protocollo applicativo utilizzato in modo univoco (h2 e h2c), può essere considerato come una protezione sufficiente dai cross-protocol attacks.
+Questo perchè ALPN dà una chiara indicazione che il server vuole utilizzare il protocollo HTTP/2, cosa che quindi impedisce l'utilizzo di altri protocolli TLS based.
+
+Per quanto riguarda la versione in chiaro dell'HTTP/2 invece non è presente e garantia massima sicurezza da questi tipi di attacchi.
+
+\subsubsection{Denial-of-Service}
+Le considerazioni fatte sulle tecniche che HTTP/2 utilizza per migliorare l'esperienza dell'utente rende il protocollo più complesso rispetto alle versioni 1.x.
+
+Queste nuove funzionalità ppossono essere utilizzate proprio per avviare attacchi, come ad esempio l'invio di moltissimi frame che vanno a creare un numero elevato di stream, ma prima di ricevere risposta l'attaccante annulla lo stream.
+Questo porta quindi allo spreco di risorse e tempo da parte del server che ha svolto un lavoro inutile.
+
+Oppure possono essere creati un grande numero di stream contemporaneamente che però non inviano dati.
+
+I server si possono difendere da questi tipo di attacco attraverso i settings che il protocollo propone, come ad esempio andando a limitare il numero di stream aperti in una stessa connessione, oppure utilizzando dei timeout ecc.
+
+Un altro modo può essere evitare che il client possa inviare delle liste di header troppo lunghe, dato che se viene creata una lista molto lunga l'endpoint deve riservare una grande quantità di memoria solo per gli header.
 \end{document} % Fine del documento
